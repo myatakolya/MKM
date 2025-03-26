@@ -1,5 +1,6 @@
 import sys
 import math
+import numpy as np
 import matplotlib.pyplot as plt
 from PyQt5.QtWidgets import (QApplication, QWidget, QLabel, QLineEdit, QPushButton,
                              QVBoxLayout, QHBoxLayout, QTextEdit, QSizePolicy, QDoubleSpinBox, QCheckBox)
@@ -36,6 +37,8 @@ class Physic:
         self.vM = vM
         self.gravity = gravity
         self.dt = dt
+        self.g_vec = np.array([0.0, -self.gravity])  # Precompute gravity vector
+        self.air_res_coeff = self.gravity / self.vM ** 2  # Precompute air resistance coefficient
 
     def range_no_air_resistance(self, angle_degrees):
         """
@@ -61,7 +64,7 @@ class Physic:
 
     def predictor_corrector(self, angle_degrees, wind_speed=0):
         """
-        Реализует метод Предиктор-Корректор для моделирования движения тела с учетом сопротивления воздуха и ветра.
+        Реализует метод Предиктор-Корректор для моделирования движения тела с учетом сопротивления воздуха и ветра (Векторная реализация).
 
         Args:
             angle_degrees: Угол вылета в градусах.
@@ -70,41 +73,35 @@ class Physic:
         Returns:
             Кортеж: (массив x-координат, массив y-координат, время полета)
         """
-        angle_radians = math.radians(angle_degrees)
-        x = 0
-        y = 0
-        vx = self.v0 * math.cos(angle_radians) - wind_speed  # Учет ветра
-        vy = self.v0 * math.sin(angle_radians)
-        trajectory_x = [x]
-        trajectory_y = [y]
+        angle_radians = np.radians(angle_degrees)
+        # Начальные условия в виде векторов
+        pos = np.array([0.0, 0.0])  # [x, y] - вектор позиции (начало координат)
+        vel = np.array([self.v0 * np.cos(angle_radians) - wind_speed, self.v0 * np.sin(angle_radians)]) # [vx, vy] - вектор скорости (начальная скорость с учетом ветра)
+
+        # Initial acceleration
+        acc = self.g_vec  # Initial acceleration is just gravity (no air resistance initially)
+
+        trajectory = [pos.copy()] # Initial position
         time = 0
+        dt = self.dt  # Cache dt for faster access
 
-        while y >= 0:
-            # Предиктор
-            v = math.sqrt(vx ** 2 + vy ** 2)
-            ax = - (self.gravity / self.vM ** 2) * v * vx
-            ay = - self.gravity - (self.gravity / self.vM ** 2) * v * vy
+        while pos[1] >= 0:  # Пока y >= 0
 
-            vx_pred = vx + ax * self.dt
-            vy_pred = vy + ay * self.dt
-            x_pred = x + vx * self.dt
-            y_pred = y + vy * self.dt
+            # Предиктор:
+            pos_pred = pos + vel * dt + 0.5 * acc * dt**2  # ri+1 = ri + vi * dt + (1/2) * ai * dt^2 - прогнозируем положение
+            vel_pred = vel + acc * dt  # vi+1 = vi + ai * dt - прогнозируем скорость
 
-            # Корректор
-            v_pred = math.sqrt(vx_pred ** 2 + vy_pred ** 2)
-            ax_pred = - (self.gravity / self.vM ** 2) * v_pred * vx_pred
-            ay_pred = - self.gravity - (self.gravity / self.vM ** 2) * v_pred * vy_pred
+            # Корректор:
+            acc_pred = self.g_vec - (self.air_res_coeff) * np.linalg.norm(vel_pred) * vel_pred  # ai+1 = g - (g / vM^2) * vi+1 - вычисляем ускорение с учетом сопротивления воздуха
+            vel = vel + 0.5 * (acc + acc_pred) * dt  # vi+1 = vi + ((ai + ai+1) / 2) * dt - уточняем скорость
+            pos = pos + vel * dt #ri+1 = ri + vi * dt  -  уточняем позицию (упрощенно, можно использовать более точную формулу)
+            acc = self.g_vec - (self.air_res_coeff) * np.linalg.norm(vel) * vel # Обновляем ускорение для следующей итерации
+            
+            trajectory.append(pos.copy()) # Store a copy of the position
+            time += dt
 
-            vx = vx + 0.5 * (ax + ax_pred) * self.dt
-            vy = vy + 0.5 * (ay + ay_pred) * self.dt
-            x = x + 0.5 * (vx + vx_pred) * self.dt
-            y = y + 0.5 * (vy + vy_pred) * self.dt
-
-            trajectory_x.append(x)
-            trajectory_y.append(y)
-            time += self.dt
-
-        return trajectory_x, trajectory_y, time
+        trajectory = np.array(trajectory)  # Convert to NumPy array
+        return trajectory[:, 0], trajectory[:, 1], time  # Return x, y, and time
 
     def find_optimal_angle_with_air_resistance(self, wind_speed=0, angle_step=0.1):
         """
@@ -117,56 +114,50 @@ class Physic:
         Returns:
             Оптимальный угол в градусах.
         """
+        angles = np.arange(0, 90, angle_step)
+        max_ranges = np.zeros_like(angles)
 
-        optimal_angle = 0.0
-        max_range = 0.0
-
-        for angle in range(0, 900, int(angle_step * 10)):  # Итерируемся от 0 до 90 градусов с шагом angle_step
-            angle /= 10.0
+        for i, angle in enumerate(angles):
             trajectory_x, _, _ = self.predictor_corrector(angle, wind_speed)
-            current_range = trajectory_x[-1]  # Последняя x-координата - это дальность полета
+            max_ranges[i] = trajectory_x[-1]
 
-            if current_range > max_range:
-                max_range = current_range
-                optimal_angle = angle
-
-        return optimal_angle
-
+        optimal_angle_index = np.argmax(max_ranges) # Index of maximum range
+        return angles[optimal_angle_index]
 
     def vertical_fall_predictor_corrector(self, initial_height):
-        """
-        Моделирует вертикальное падение тела с учетом сопротивления воздуха с использованием метода предиктор-корректор.
+         """
+         Моделирует вертикальное падение тела с учетом сопротивления воздуха с использованием метода предиктор-корректор (векторная версия).
 
-        Args:
-            initial_height: Начальная высота тела, м.
+         Args:
+             initial_height: Начальная высота тела, м.
 
-        Returns:
-            Кортеж: (массив времен, массив высот, массив скоростей)
-        """
-        y = initial_height
-        vy = 0  # Начальная вертикальная скорость
-        times = [0]
-        heights = [y]
-        velocities = [vy]
-        time = 0
+         Returns:
+             Кортеж: (массив времен, массив высот, массив скоростей)
+         """
+         y = initial_height
+         vy = 0  # Начальная вертикальная скорость
+         times = [0]
+         heights = [y]
+         velocities = [vy]
+         time = 0
 
-        while y > 0:
-            # Предиктор
-            ay = - self.gravity - (self.gravity / self.vM ** 2) * vy * abs(vy)  # Ускорение всегда против скорости
-            vy_pred = vy + ay * self.dt
-            y_pred = y + vy * self.dt
+         while y > 0:
+             # Предиктор
+             ay = - self.gravity - (self.gravity / self.vM ** 2) * vy * abs(vy)  # Ускорение всегда против скорости
+             vy_pred = vy + ay * self.dt
+             y_pred = y + vy * self.dt
 
-            # Корректор
-            ay_pred = - self.gravity - (self.gravity / self.vM ** 2) * vy_pred * abs(vy_pred)
-            vy = vy + 0.5 * (ay + ay_pred) * self.dt
-            y = y + 0.5 * (vy + vy_pred) * self.dt
+             # Корректор
+             ay_pred = - self.gravity - (self.gravity / self.vM ** 2) * vy_pred * abs(vy_pred)
+             vy = vy + 0.5 * (ay + ay_pred) * self.dt
+             y = y + 0.5 * (vy + vy_pred) * self.dt
 
-            time += self.dt
-            times.append(time)
-            heights.append(y)
-            velocities.append(vy)
+             time += self.dt
+             times.append(time)
+             heights.append(y)
+             velocities.append(vy)
 
-        return times, heights, velocities
+         return times, heights, velocities
 
 
 class PhysicsGUI(QWidget):

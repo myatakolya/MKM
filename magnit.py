@@ -87,35 +87,62 @@ class HorseshoeMagnet:
                     Hx[i,j], Hy[i,j], Hz[i,j] = self.H_ext(X[i,j], Y[i,j], z_coord)
 
             H_magnitude = np.sqrt(Hx**2 + Hy**2)
-            Hx_norm, Hy_norm = Hx / H_magnitude, Hy / H_magnitude
+            Hx_norm, Hy_norm = Hx / (H_magnitude + 1e-10), Hy / (H_magnitude + 1e-10)
+            
             self.axes.clear()
 
-            # Вертикальное расположение магнита (вид сбоку)
-            pole_height = self.b * 1.5
-            arc_radius = self.d/2 + self.a
+            # Корректное отображение подковы (вид сбоку)
+            pole_width = self.a
+            pole_height = self.b
+            gap = self.d - pole_width  # Расстояние между ножками
             
-            # Дуга подковы
-            self.axes.add_patch(Arc((self.d/2, 0), width=arc_radius*2, height=pole_height*2, 
-                               theta1=0, theta2=180, color='gray', linewidth=10, alpha=0.3))
+            # Левая ножка (северный полюс - синий)
+            self.axes.add_patch(Rectangle(
+                (0, 0), 
+                pole_width, 
+                pole_height, 
+                color='blue', alpha=0.4, label='Северный полюс'
+            ))
             
-            # Ножки подковы
-            self.axes.add_patch(Rectangle((0, -pole_height/2), self.a, pole_height/2,
-                              color='blue', alpha=0.4, label='Северный полюс'))
-            self.axes.add_patch(Rectangle((self.d, -pole_height/2), self.a, pole_height/2,
-                              color='blue', alpha=0.4))
-            self.axes.add_patch(Rectangle((0, -pole_height), self.a, pole_height/2,
-                              color='red', alpha=0.4, label='Южный полюс'))
-            self.axes.add_patch(Rectangle((self.d, -pole_height), self.a, pole_height/2,
-                              color='red', alpha=0.4))
+            # Правая ножка (южный полюс - красный)
+            self.axes.add_patch(Rectangle(
+                (self.d, 0), 
+                pole_width, 
+                pole_height, 
+                color='red', alpha=0.4, label='Южный полюс'
+            ))
+            
+            # Дуга подковы (серый)
+            arc_center_x = self.d / 2
+            arc_height = pole_height * 1.2
+            self.axes.add_patch(Arc(
+                (arc_center_x, pole_height), 
+                width=self.d + pole_width,  # Ширина дуги
+                height=arc_height, 
+                theta1=180, theta2=0, 
+                color='gray', linewidth=4, alpha=0.4
+            ))
 
-            self.axes.quiver(X, Y, Hx_norm, Hy_norm, angles='xy', scale_units='xy', scale=15, pivot='mid')
+            # Векторное поле
+            self.axes.quiver(
+                X, Y, Hx_norm, Hy_norm, 
+                angles='xy', 
+                scale_units='xy', 
+                scale=25,  # Уменьшенный масштаб для лучшей видимости
+                pivot='mid', 
+                width=0.003,
+                headlength=4,
+                headaxislength=3
+            )
+            
             self.axes.set_xlabel("x, м")
             self.axes.set_ylabel("y, м")
-            self.axes.set_title(f"Магнитное поле в плоскости Z=0\nРазмеры: a={self.a}, b={self.b}, d={self.d}")
+            self.axes.set_title(f"Магнитное поле в плоскости Z=0 (вид сбоку)\nРазмеры: a={self.a}, b={self.b}, d={self.d}")
             self.axes.set_xlim(x_range)
-            self.axes.set_ylim(y_range)
+            self.axes.set_ylim([y_range[0], y_range[1] + arc_height])  # Учет высоты дуги
+            self.axes.grid(True)
             self.axes.set_aspect('equal')
-            self.axes.legend()
+            self.axes.legend(loc='upper right')
             self.canvas.draw()
 
 
